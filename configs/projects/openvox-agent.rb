@@ -6,7 +6,7 @@ project 'openvox-agent' do |proj|
   # - Settings included in this file should apply only to local components in this repository.
   runtime_details = JSON.parse(File.read('configs/components/puppet-runtime.json'))
   pxp_agent_details = JSON.parse(File.read('configs/components/pxp-agent.json'))
-  agent_branch = '7.x'
+  agent_branch = 'main'
 
   settings[:puppet_runtime_version] = runtime_details['version']
   settings[:puppet_runtime_location] = runtime_details['location']
@@ -21,11 +21,6 @@ project 'openvox-agent' do |proj|
   metadata_uri = File.join(runtime_details['location'], "#{proj.settings[:puppet_runtime_basename]}.json")
   proj.inherit_yaml_settings(settings_uri, sha1sum_uri, metadata_uri: metadata_uri)
 
-  # (PA-678) pe-r10k versions prior to 2.5.0.0 ship gettext gems.
-  # Since we also ship those gems as part of puppet-agent
-  # at present, we need to conflict with pe-r10k < 2.5.0.0
-  proj.conflicts "pe-r10k", "2.5.0.0"
-
   if platform.is_macos?
     proj.extra_file_to_sign File.join(proj.bindir, 'puppet')
     proj.extra_file_to_sign File.join(proj.bindir, 'pxp-agent')
@@ -38,6 +33,14 @@ project 'openvox-agent' do |proj|
   if platform.is_fedora? || platform.name =~ /el-10/
     proj.package_override("# Disable check-rpaths since /opt/* is not a valid path\n%global __brp_check_rpaths %{nil}")
     proj.package_override("# Disable the removal of la files, they are still required\n%global __brp_remove_la_files %{nil}")
+  end
+
+  # Override gem related commands since runtime was natively compiled, but we're
+  # cross compiling this project.
+  if platform.name == 'solaris-11-sparc'
+    proj.setting(:host_ruby, '/opt/pl-build-tools/bin/ruby')
+    proj.setting(:host_gem, '/opt/pl-build-tools/bin/gem')
+    proj.setting(:gem_install, '/opt/pl-build-tools/bin/gem install --no-rdoc --no-ri --local ')
   end
 
   # Project level settings our components will care about
@@ -90,7 +93,7 @@ project 'openvox-agent' do |proj|
   proj.license "See components"
   proj.vendor "Vox Pupuli <openvox@voxpupuli.org>"
   proj.homepage "https://voxpupuli.org"
-  proj.target_repo "openvox7"
+  proj.target_repo "openvox8"
 
   if platform.is_solaris?
     proj.identifier "voxpupuli.org"
@@ -108,11 +111,11 @@ project 'openvox-agent' do |proj|
 
   # Provides augeas, curl, libedit, libxml2, libxslt, openssl, puppet-ca-bundle, ruby and rubygem-*
   proj.component "puppet-runtime"
+  proj.component 'openssl-fips' if platform.is_fips?
   proj.component "pxp-agent" if ENV['NO_PXP_AGENT'].to_s.empty?
 
   proj.component "puppet"
   proj.component "facter"
-  proj.component "hiera"
 
   proj.component "puppet-resource_api"
 
@@ -158,6 +161,10 @@ project 'openvox-agent' do |proj|
   if platform.is_windows? || platform.is_macos?
     proj.directory proj.bindir
   end
+
+  # make sure we can replace puppet-agent in place for the rename
+  proj.replaces 'puppet-agent'
+  proj.conflicts 'puppet-agent'
 
   proj.timeout 7200 if platform.is_windows?
 end
